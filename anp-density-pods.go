@@ -1,0 +1,79 @@
+// Copyright 2024 The Kube-burner Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package ocp
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/kube-burner/kube-burner/pkg/workloads"
+	log "github.com/sirupsen/logrus"
+	"github.com/spf13/cobra"
+)
+
+// NewUDNDensityPods holds udn-density-pods workload
+func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Command {
+	var churnPercent, churnCycles, iterations int
+	var churn, svcLatency, simple, pprof bool
+	var jobPause time.Duration
+	var churnDelay, churnDuration, podReadyThreshold time.Duration
+	var churnDeletionStrategy string
+	var metricsProfiles []string
+	var rc int
+	cmd := &cobra.Command{
+		Use:   variant,
+		Short: fmt.Sprintf("Runs %v workload", variant),
+		Run: func(cmd *cobra.Command, args []string) {
+			setMetrics(cmd, metricsProfiles)
+
+			if churn {
+				log.Info("Churn is enabled, there will not be a pause after UDN creation")
+			}
+
+			AdditionalVars["PPROF"] = pprof
+			AdditionalVars["SIMPLE"] = simple
+			AdditionalVars["CHURN"] = churn
+			AdditionalVars["CHURN_CYCLES"] = churnCycles
+			AdditionalVars["CHURN_DURATION"] = churnDuration
+			AdditionalVars["CHURN_DELAY"] = churnDelay
+			AdditionalVars["CHURN_PERCENT"] = churnPercent
+			AdditionalVars["CHURN_DELETION_STRATEGY"] = churnDeletionStrategy
+			AdditionalVars["JOB_ITERATIONS"] = iterations
+			AdditionalVars["POD_READY_THRESHOLD"] = podReadyThreshold
+			AdditionalVars["SVC_LATENCY"] = svcLatency
+
+			rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
+		},
+		PostRun: func(cmd *cobra.Command, args []string) {
+			os.Exit(rc)
+		},
+	}
+	cmd.Flags().DurationVar(&jobPause, "job-pause", 0, "Time to pause after finishing the job that creates the UDN")
+	cmd.Flags().BoolVar(&pprof, "pprof", false, "Enable pprof collection")
+	cmd.Flags().BoolVar(&simple, "simple", false, "only client and server pods to be deployed, no services and networkpolicies")
+	cmd.Flags().BoolVar(&churn, "churn", false, "Enable churning")
+	cmd.Flags().IntVar(&churnCycles, "churn-cycles", 0, "Churn cycles to execute")
+	cmd.Flags().DurationVar(&churnDuration, "churn-duration", 1*time.Hour, "Churn duration")
+	cmd.Flags().DurationVar(&churnDelay, "churn-delay", 2*time.Minute, "Time to wait between each churn")
+	cmd.Flags().IntVar(&churnPercent, "churn-percent", 10, "Percentage of job iterations that kube-burner will churn each round")
+	cmd.Flags().StringVar(&churnDeletionStrategy, "churn-deletion-strategy", "default", "Churn deletion strategy to use")
+	cmd.Flags().IntVar(&iterations, "iterations", 0, "Iterations")
+	cmd.Flags().BoolVar(&svcLatency, "service-latency", false, "Enable service latency measurement")
+	cmd.Flags().DurationVar(&podReadyThreshold, "pod-ready-threshold", 1*time.Minute, "Pod ready timeout threshold")
+	cmd.Flags().StringSliceVar(&metricsProfiles, "metrics-profile", []string{"metrics.yml"}, "Comma separated list of metrics profiles to use")
+	cmd.MarkFlagRequired("iterations")
+	return cmd
+}
