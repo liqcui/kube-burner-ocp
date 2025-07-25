@@ -228,8 +228,9 @@ jobs:
     jobIterations: 1
     qps: {{.QPS}}
     burst: {{.BURST}}
-    namespacedIterations: true
+    namespacedIterations: false
     podWait: false
+    churn: {{.CHURN}}    
     waitWhenFinished: true
     preLoadImages: true
     preLoadPeriod: 15s
