@@ -251,7 +251,7 @@ jobs:
       - objectTemplate: anp-pod-selector-no-traffic-open-from-cidr.yml
         replicas: 1
 
-      - objectTemplate: anp-pod-selector-no-traffic-open-from-cidr.yml
+      - objectTemplate: anp-pod-selector-no-traffic-restricted-from-cidr.yml
         replicas: 1
 
       - objectTemplate: anp-allow-openshift-dns.yml
