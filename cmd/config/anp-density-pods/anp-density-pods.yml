@@ -223,3 +223,44 @@ jobs:
           podReplicas: 1
           anplabel: "anp-cidr"
 
+jobs:
+  - name: anp-create-policy
+    jobType: create
+    namespace: default
+    jobIterations: 1
+    qps: {{.QPS}}
+    burst: {{.BURST}}
+    namespacedIterations: false
+    podWait: false
+    churn: {{.CHURN}}    
+    waitWhenFinished: true
+    preLoadImages: true
+    preLoadPeriod: 15s
+    objects:
+
+      - objectTemplate: banp-default-deny-traffic.yml
+        replicas: 1
+
+      - objectTemplate: anp-node-selector-two-worker-group.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-allow-egress-restricted-to-open.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-allow-ingress-restricted-from-open.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-no-traffic-open-from-cidr.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-no-traffic-restricted-from-cidr.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-dns.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-ingress.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-kubeapi.yml
+        replicas: 1

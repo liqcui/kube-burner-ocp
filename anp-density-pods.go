@@ -26,6 +26,7 @@ import (
 	"github.com/kube-burner/kube-burner/pkg/config"
 	"github.com/kube-burner/kube-burner/pkg/workloads"
 	log "github.com/sirupsen/logrus"
+	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -101,20 +102,21 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 	}
 
 	// Remove existing anp-density-policy.yml and copy template if file exists
+	fs := afero.NewOsFs() // Replace with your embedded writable FS if needed
 	policyFile := "./config/anp-density-pods/anp-density-policy.yml"
 	templateFile := "./config/anp-density-pods/anp-density-policy-template.yml"
-	_, err = os.Stat(policyFile)
+	_, err = fs.Stat(policyFile)
 	if !errors.Is(err, os.ErrNotExist) {
 		// File exists, remove and copy template
-		if err := os.Remove(policyFile); err != nil {
+		if err := fs.Remove(policyFile); err != nil {
 			log.Printf("Failed to remove %s: %v", policyFile, err)
 		} else {
-			input, err := os.ReadFile(templateFile)
+			input, err := afero.ReadFile(fs, templateFile)
 			if err != nil {
 				log.Printf("Failed to read template file %s: %v", templateFile, err)
 			} else {
 				fmt.Println("copy file anp-density-policy.yml from anp-density-pods/anp-density-policy-template.yml")
-				if err := os.WriteFile(policyFile, input, 0644); err != nil {
+				if err := afero.WriteFile(fs, policyFile, input, 0644); err != nil {
 					log.Printf("Failed to copy template to %s: %v", policyFile, err)
 				}
 			}
@@ -164,13 +166,13 @@ spec:
       matchLabels:
         customer_tenant: tenant%d
   ingress:
-  - name: "all-ingress-from-same-tenant"  
-    action: Allow   # Allows connection 
+  - name: "all-ingress-from-same-tenant"
+    action: Allow   # Allows connection
     from:
     - namespaces:
         matchLabels:
           customer_tenat: tenant%d
-  egress:                           
+  egress:
   - name: "pass-egress-to-cluster-network"
     action: "Pass"
     ports:
@@ -179,7 +181,7 @@ spec:
           protocol: TCP
       - portNumber:
           port: 9094
-          protocol: TCP    
+          protocol: TCP
     to:
     - networks:
       - 10.128.0.0/14
@@ -207,22 +209,28 @@ spec:
 
 		// Optionally, print YAML to stdout for debugging
 		if newTenant {
+			// Save YAML to embedded filesystem (example using go:embed)
+			// This requires you to have an embedded FS variable, e.g.:
+			// var embeddedFS embed.FS
+			// For writing, you need to use a writable FS implementation, such as "github.com/spf13/afero"
+			// Here is an example using afero:
+			fs := afero.NewOsFs() // Replace with your embedded writable FS if available
 			fileName := fmt.Sprintf("./config/anp-density-pods/anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml", sourceNsPrefix, targetNsPrefix, tenantID, priority)
-			err := os.WriteFile(fileName, yaml.Bytes(), 0644)
+			err := afero.WriteFile(fs, fileName, yaml.Bytes(), 0644)
 			if err != nil {
-				log.Printf("Failed to write YAML to file %s: %v", fileName, err)
+				log.Printf("Failed to write YAML to embedded FS file %s: %v", fileName, err)
 			} else {
-				fmt.Printf("YAML written to file: %s\n", fileName)
+				fmt.Printf("YAML written to embedded FS file: %s\n", fileName)
 			}
 
 			appendStr := fmt.Sprintf("\n      - objectTemplate: anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml\n        replicas: 1\n", sourceNsPrefix, targetNsPrefix, tenantID, priority)
-			f, err := os.OpenFile(policyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			f, err := fs.OpenFile(policyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err != nil {
-				log.Printf("Failed to open %s for appending: %v", policyFile, err)
+				log.Printf("Failed to open %s for appending in embedded FS: %v", policyFile, err)
 			} else {
 				defer f.Close()
 				if _, err := f.WriteString(appendStr); err != nil {
-					log.Printf("Failed to append to %s: %v", policyFile, err)
+					log.Printf("Failed to append to %s in embedded FS: %v", policyFile, err)
 				}
 			}
 
