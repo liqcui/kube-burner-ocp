@@ -290,10 +290,11 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			}
 
 			//rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
-			rc = wh.RunWithAdditionalVars("anp-density-policy.yml", AdditionalVars, nil)
+
 		},
 
 		PostRun: func(cmd *cobra.Command, args []string) {
+			rc = wh.RunWithAdditionalVars("anp-density-policy.yml", AdditionalVars, nil)
 			os.Exit(rc)
 		},
 	}
