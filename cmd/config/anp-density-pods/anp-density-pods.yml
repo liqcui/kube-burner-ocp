@@ -222,8 +222,7 @@ jobs:
         inputVars:
           podReplicas: 1
           anplabel: "anp-cidr"
-
-jobs:
+          
   - name: anp-create-policy
     jobType: create
     namespace: default
