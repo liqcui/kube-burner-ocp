@@ -1,0 +1,92 @@
+---
+global:
+  gc: {{.GC}}
+  gcMetrics: {{.GC_METRICS}}
+  measurements:
+    - name: podLatency
+      thresholds:
+        - conditionType: Ready
+          metric: P99
+          threshold: {{.POD_READY_THRESHOLD}}
+{{ if .PPROF }}
+    - name: pprof
+      pprofInterval: 2m
+      pprofDirectory: pprof-data
+      pprofTargets:
+      - name: ovnkube-controller
+        namespace: "openshift-ovn-kubernetes"
+        labelSelector: {app: ovnkube-node}
+        url: http://localhost:29103/debug/pprof/profile?seconds=30
+      - name: ovn-controller
+        namespace: "openshift-ovn-kubernetes"
+        labelSelector: {app: ovnkube-node}
+        url: http://localhost:29105/debug/pprof/profile?seconds=30
+      - name: ovnk-control-plane
+        namespace: "openshift-ovn-kubernetes"
+        labelSelector: {app: ovnkube-control-plane}
+        url: http://localhost:29108/debug/pprof/profile?seconds=30
+{{ end }}
+{{ if .SVC_LATENCY }}
+    - name: serviceLatency
+      svcTimeout: 10s
+{{ end }}
+metricsEndpoints:
+{{ if .ES_SERVER }}
+  - metrics: [{{.METRICS}}]
+    alerts: [{{.ALERTS}}]
+    indexer:
+      esServers: ["{{.ES_SERVER}}"]
+      insecureSkipVerify: true
+      defaultIndex: {{.ES_INDEX}}
+      type: opensearch
+{{ end }}
+{{ if .LOCAL_INDEXING }}
+  - metrics: [{{.METRICS}}]
+    alerts: [{{.ALERTS}}]
+    indexer:
+      type: local
+      metricsDirectory: collected-metrics-{{.UUID}}
+{{ end }}
+
+jobs:
+  - name: anp-create-policy
+    namespace: default
+    jobIterations: 1
+    qps: {{.QPS}}
+    burst: {{.BURST}}
+    namespacedIterations: false
+    podWait: false
+    churn: {{.CHURN}}    
+    waitWhenFinished: true
+    preLoadImages: true
+    preLoadPeriod: 15s
+    objects:
+
+      - objectTemplate: banp-default-deny-traffic.yml
+        replicas: 1
+
+      - objectTemplate: anp-node-selector-two-worker-group.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-allow-egress-restricted-to-open.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-allow-ingress-restricted-from-open.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-no-traffic-open-from-cidr.yml
+        replicas: 1
+
+      - objectTemplate: anp-pod-selector-no-traffic-restricted-from-cidr.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-dns.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-ingress.yml
+        replicas: 1
+
+      - objectTemplate: anp-allow-openshift-kubeapi.yml
+        replicas: 1
+
+

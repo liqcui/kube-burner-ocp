@@ -17,6 +17,7 @@ package ocp
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -27,12 +28,8 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/rest"
 )
 
 type PodInfo struct {
@@ -85,50 +82,6 @@ func getPodsByNamespaceAndPattern(namespace, pattern string) ([]PodInfo, error) 
 	return pods, nil
 }
 
-// Apply AdminNetworkPolicy using Dynamic Client
-func applyWithDynamicClient(config *rest.Config, yamlString string) error {
-	// Create dynamic client
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return fmt.Errorf("failed to create dynamic client: %v", err)
-	}
-
-	// Parse YAML to unstructured object
-	obj := &unstructured.Unstructured{}
-	dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
-	_, _, err = dec.Decode([]byte(yamlString), nil, obj)
-	if err != nil {
-		return fmt.Errorf("failed to decode YAML: %v", err)
-	}
-
-	// Get the resource interface for AdminNetworkPolicy
-	anpClient := dynamicClient.Resource(anpGVR)
-
-	ctx := context.TODO()
-
-	// Try to get existing resource
-	name := obj.GetName()
-	existing, err := anpClient.Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
-		// Resource doesn't exist, create it
-		_, err = anpClient.Create(ctx, obj, metav1.CreateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to create AdminNetworkPolicy: %v", err)
-		}
-		fmt.Printf("AdminNetworkPolicy '%s' created\n", name)
-	} else {
-		// Resource exists, update it
-		obj.SetResourceVersion(existing.GetResourceVersion())
-		_, err = anpClient.Update(ctx, obj, metav1.UpdateOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to update AdminNetworkPolicy: %v", err)
-		}
-		fmt.Printf("AdminNetworkPolicy '%s' updated\n", name)
-	}
-
-	return nil
-}
-
 func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 	sourceNsPrefix, targetNsPrefix string,
 	targetNsAllowPod string,
@@ -147,23 +100,46 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 		return fmt.Errorf("No SOURCE_NS_PREFIX %s was found", sourceNsPrefix)
 	}
 
+	// Remove existing anp-density-policy.yml and copy template if file exists
+	policyFile := "./config/anp-density-pods/anp-density-policy.yml"
+	templateFile := "./config/anp-density-pods/anp-density-policy-template.yml"
+	_, err = os.Stat(policyFile)
+	if !errors.Is(err, os.ErrNotExist) {
+		// File exists, remove and copy template
+		if err := os.Remove(policyFile); err != nil {
+			log.Printf("Failed to remove %s: %v", policyFile, err)
+		} else {
+			input, err := os.ReadFile(templateFile)
+			if err != nil {
+				log.Printf("Failed to read template file %s: %v", templateFile, err)
+			} else {
+				fmt.Println("copy file anp-density-policy.yml from anp-density-pods/anp-density-policy-template.yml")
+				if err := os.WriteFile(policyFile, input, 0644); err != nil {
+					log.Printf("Failed to copy template to %s: %v", policyFile, err)
+				}
+			}
+		}
+	}
 	// For simplicity, only use the first source ns
 	tenantID := 1
 	priority := 1
+	newTenant := true
+	// Use client-go to label the namespace instead of exec.Command
+	kubeClientProvider := config.NewKubeClientProvider("", "")
+	// clientSet, _ := kubeClientProvider.ClientSet(0, 0)
+	clientSet, _ := kubeClientProvider.ClientSet(0, 0)
 
 	// For each tenant, generate a YAML
 	for nsIdx, sns := range sourceNsList {
 		if nsIdx%totalNsByTenant == 0 && nsIdx != 0 {
 			tenantID++
 			priority++
+			newTenant = true
 			if priority > 99 {
 				priority = 1
 			}
 		}
 		// Label the namespace
-		// Use client-go to label the namespace instead of exec.Command
-		kubeClientProvider := config.NewKubeClientProvider("", "")
-		clientSet, _ := kubeClientProvider.ClientSet(0, 0)
 
 		patchOps := []byte(`[{"op": "add", "path": "/metadata/labels/customer_tenant", "value": "tenant` + fmt.Sprintf("%d", tenantID) + `"}]`)
 
@@ -230,17 +206,29 @@ spec:
 		}
 
 		// Optionally, print YAML to stdout for debugging
-		fmt.Println(yaml.String())
+		if newTenant {
+			fileName := fmt.Sprintf("./config/anp-density-pods/anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml", sourceNsPrefix, targetNsPrefix, tenantID, priority)
+			err := os.WriteFile(fileName, yaml.Bytes(), 0644)
+			if err != nil {
+				log.Printf("Failed to write YAML to file %s: %v", fileName, err)
+			} else {
+				fmt.Printf("YAML written to file: %s\n", fileName)
+			}
 
-		// Use dynamic client to apply the YAML
-		// Using Dynamic Client
-		clientSet, restConfig := kubeClientProvider.ClientSet(0, 0)
-		if err := applyWithDynamicClient(restConfig, yaml.String()); err != nil {
-			log.Fatalf("Error applying with dynamic client: %v", err)
+			appendStr := fmt.Sprintf("\n      - objectTemplate: anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml\n        replicas: 1\n", sourceNsPrefix, targetNsPrefix, tenantID, priority)
+			f, err := os.OpenFile(policyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				log.Printf("Failed to open %s for appending: %v", policyFile, err)
+			} else {
+				defer f.Close()
+				if _, err := f.WriteString(appendStr); err != nil {
+					log.Printf("Failed to append to %s: %v", policyFile, err)
+				}
+			}
+
+			newTenant = false
 		}
-
 	}
-
 	return nil
 }
 
@@ -275,7 +263,8 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			AdditionalVars["POD_READY_THRESHOLD"] = podReadyThreshold
 			AdditionalVars["SVC_LATENCY"] = svcLatency
 
-			rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
+			//rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
+			rc = wh.RunWithAdditionalVars("anp-density-pods.yml", AdditionalVars, nil)
 
 			sourceNsPrefix := "anp-cidr"
 			targetNsPrefix := "openshift-monitoring"
@@ -299,7 +288,11 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
+
+			//rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
+			rc = wh.RunWithAdditionalVars("anp-density-policy.yml", AdditionalVars, nil)
 		},
+
 		PostRun: func(cmd *cobra.Command, args []string) {
 			os.Exit(rc)
 		},
