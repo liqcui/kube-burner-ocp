@@ -1,9 +1,9 @@
 apiVersion: policy.networking.k8s.io/v1alpha1
 kind: AdminNetworkPolicy
 metadata:
-  name: anp-pod-selector-no-traffic-restricted-from-cidr-p14
+  name: anp-pod-selector-no-traffic-restricted-from-cidr-p13
 spec:
-  priority: 14
+  priority: 13
   subject:
     pods:
       namespaceSelector:

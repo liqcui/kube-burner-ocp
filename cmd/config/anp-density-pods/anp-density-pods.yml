@@ -243,10 +243,7 @@ jobs:
       - objectTemplate: anp-node-selector-two-worker-group.yml
         replicas: 1
 
-      - objectTemplate: anp-pod-selector-allow-egress-restricted-to-open.yml
-        replicas: 1
-
-      - objectTemplate: anp-pod-selector-allow-ingress-restricted-from-open.yml
+      - objectTemplate: anp-pod-selector-policy-rules-restricted-and-open.yml
         replicas: 1
 
       - objectTemplate: anp-pod-selector-no-traffic-open-from-cidr.yml

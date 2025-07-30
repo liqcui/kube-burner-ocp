@@ -142,27 +142,27 @@ func verifyAdminNetworkPolicies(config *rest.Config, expectedANPs int) error {
 
 	anpList, err := dynamicClient.Resource(anpGVR).List(context.TODO(), metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list AdminNetworkPolicies: %v", err)
+		return fmt.Errorf("failed to list adminnetworkpolicies: %v", err)
 	}
 
 	for _, item := range anpList.Items {
 		status, found, err := unstructured.NestedMap(item.Object, "status")
 		resourceName := item.GetName()
 		if err != nil || !found {
-			fmt.Printf("Status not found for AdminNetworkPolicy '%s'\n", item.GetName())
+			log.Debug("status not found for adminnetworkpolicies", item.GetName())
 			continue
 		} else {
 			// For status.conditions pattern
 			conditions := status["conditions"].([]interface{})
 			reason := conditions[0].(map[string]interface{})["reason"].(string)
-			log.Info("adminnetworkpolicies: ", resourceName, " ", reason)
+			log.Debug("adminnetworkpolicies: ", resourceName, " ", reason)
 		}
 	}
 
 	log.Info("adminnetworkpolicies found: ", len(anpList.Items), " Expected: ", expectedANPs)
 
 	if len(anpList.Items) == 0 || len(anpList.Items) != expectedANPs {
-		return fmt.Errorf("No AdminNetworkPolicies found or mismatch expect number of ANPs.: %v", err)
+		return fmt.Errorf("No adminnetworkpolicies found or mismatch expect number of ANPs.: %v", err)
 	}
 
 	return nil
@@ -178,12 +178,12 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 	totalIpBlockNumByRule int,
 ) error {
 	if sourceNsPrefix == "" || targetNsPrefix == "" {
-		return fmt.Errorf("please specify TARGET_NS_PREFIX or SOURCE_NS_PREFIX")
+		return fmt.Errorf("please specify targetNsPrefix or sourceNsPrefix")
 	}
 
 	sourceNsList, err := getNamespacesByPrefix(sourceNsPrefix)
 	if err != nil || len(sourceNsList) == 0 {
-		return fmt.Errorf("No SOURCE_NS_PREFIX %s was found", sourceNsPrefix)
+		return fmt.Errorf("No source namespace with prefix %s was found", sourceNsPrefix)
 	}
 
 	// For simplicity, only use the first source ns
@@ -333,7 +333,6 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			AdditionalVars["SVC_LATENCY"] = svcLatency
 
 			rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
-			//rc = wh.RunWithAdditionalVars("anp-density-pods.yml", AdditionalVars, nil)
 
 			sourceNsPrefix := "anp-cidr"
 			targetNsPrefix := "openshift-monitoring"
