@@ -115,7 +115,7 @@ func applyWithDynamicClient(config *rest.Config, yamlString string) error {
 		if err != nil {
 			return fmt.Errorf("failed to create AdminNetworkPolicy: %v", err)
 		}
-		log.Info("Created AdminNetworkPolicy: ", name)
+		log.Info("Created AdminNetworkPolicy/", name)
 	} else {
 		// Resource exists, update it
 		obj.SetResourceVersion(existing.GetResourceVersion())
@@ -123,7 +123,7 @@ func applyWithDynamicClient(config *rest.Config, yamlString string) error {
 		if err != nil {
 			return fmt.Errorf("failed to update AdminNetworkPolicy: %v", err)
 		}
-		log.Info("Applied AdminNetworkPolicy: ", name)
+		log.Info("Applied AdminNetworkPolicy/", name)
 	}
 	// Optionally, print the applied YAML for debugging
 	// fmt.Println("Applied YAML:")
@@ -357,7 +357,7 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			if err != nil {
 				fmt.Printf("Error: %v\n", err)
 			}
-
+			log.Infof("👋 kube-burner run completed with rc %d for UUID %s", rc, wh.UUID)
 		},
 
 		PostRun: func(cmd *cobra.Command, args []string) {

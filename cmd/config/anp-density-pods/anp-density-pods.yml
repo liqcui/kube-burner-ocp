@@ -59,7 +59,7 @@ jobs:
     podWait: false
     waitWhenFinished: true
     preLoadImages: true
-    preLoadPeriod: 15s
+    preLoadPeriod: 30s
     namespaceLabels:
       security.openshift.io/scc.podSecurityLabelSync: false
       pod-security.kubernetes.io/enforce: privileged
@@ -91,7 +91,7 @@ jobs:
     podWait: false
     waitWhenFinished: true
     preLoadImages: true
-    preLoadPeriod: 15s
+    preLoadPeriod: 30s
     churn: {{.CHURN}}
     churnCycles: {{.CHURN_CYCLES}}
     churnDuration: {{.CHURN_DURATION}}
@@ -138,7 +138,7 @@ jobs:
     podWait: false
     waitWhenFinished: true
     preLoadImages: true
-    preLoadPeriod: 15s
+    preLoadPeriod: 30s
     churn: {{.CHURN}}
     churnCycles: {{.CHURN_CYCLES}}
     churnDuration: {{.CHURN_DURATION}}
@@ -185,7 +185,7 @@ jobs:
     podWait: false
     waitWhenFinished: true
     preLoadImages: true
-    preLoadPeriod: 15s
+    preLoadPeriod: 30s
     churn: {{.CHURN}}
     churnCycles: {{.CHURN_CYCLES}}
     churnDuration: {{.CHURN_DURATION}}
@@ -234,7 +234,7 @@ jobs:
     churn: {{.CHURN}}    
     waitWhenFinished: true
     preLoadImages: true
-    preLoadPeriod: 15s
+    preLoadPeriod: 30s
     objects:
 
       - objectTemplate: banp-default-deny-traffic.yml
