@@ -17,7 +17,6 @@ package ocp
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -26,11 +25,14 @@ import (
 	"github.com/kube-burner/kube-burner/pkg/config"
 	"github.com/kube-burner/kube-burner/pkg/workloads"
 	log "github.com/sirupsen/logrus"
-	"github.com/spf13/afero"
 	"github.com/spf13/cobra"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/runtime/serializer/yaml"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 )
 
 type PodInfo struct {
@@ -83,6 +85,89 @@ func getPodsByNamespaceAndPattern(namespace, pattern string) ([]PodInfo, error) 
 	return pods, nil
 }
 
+// Apply AdminNetworkPolicy using Dynamic Client
+func applyWithDynamicClient(config *rest.Config, yamlString string) error {
+	// Create dynamic client
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %v", err)
+	}
+
+	// Parse YAML to unstructured object
+	obj := &unstructured.Unstructured{}
+	dec := yaml.NewDecodingSerializer(unstructured.UnstructuredJSONScheme)
+	_, _, err = dec.Decode([]byte(yamlString), nil, obj)
+	if err != nil {
+		return fmt.Errorf("failed to decode YAML: %v", err)
+	}
+
+	// Get the resource interface for AdminNetworkPolicy
+	anpClient := dynamicClient.Resource(anpGVR)
+
+	ctx := context.TODO()
+
+	// Try to get existing resource
+	name := obj.GetName()
+	existing, err := anpClient.Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		// Resource doesn't exist, create it
+		_, err = anpClient.Create(ctx, obj, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to create AdminNetworkPolicy: %v", err)
+		}
+		log.Info("Created AdminNetworkPolicy: ", name)
+	} else {
+		// Resource exists, update it
+		obj.SetResourceVersion(existing.GetResourceVersion())
+		_, err = anpClient.Update(ctx, obj, metav1.UpdateOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to update AdminNetworkPolicy: %v", err)
+		}
+		log.Info("Applied AdminNetworkPolicy: ", name)
+	}
+	// Optionally, print the applied YAML for debugging
+	// fmt.Println("Applied YAML:")
+	// fmt.Println(yamlString)
+
+	return nil
+}
+
+func verifyAdminNetworkPolicies(config *rest.Config, expectedANPs int) error {
+
+	log.Info("Verifying created objects")
+	dynamicClient, err := dynamic.NewForConfig(config)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %v", err)
+	}
+
+	anpList, err := dynamicClient.Resource(anpGVR).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list AdminNetworkPolicies: %v", err)
+	}
+
+	for _, item := range anpList.Items {
+		status, found, err := unstructured.NestedMap(item.Object, "status")
+		resourceName := item.GetName()
+		if err != nil || !found {
+			fmt.Printf("Status not found for AdminNetworkPolicy '%s'\n", item.GetName())
+			continue
+		} else {
+			// For status.conditions pattern
+			conditions := status["conditions"].([]interface{})
+			reason := conditions[0].(map[string]interface{})["reason"].(string)
+			log.Info("adminnetworkpolicies: ", resourceName, " ", reason)
+		}
+	}
+
+	if len(anpList.Items) == 0 {
+		fmt.Println("No AdminNetworkPolicies found.")
+		return nil
+	}
+	log.Info("adminnetworkpolicies found: ", len(anpList.Items), " Expected: ", expectedANPs)
+
+	return nil
+}
+
 func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 	sourceNsPrefix, targetNsPrefix string,
 	targetNsAllowPod string,
@@ -101,27 +186,6 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 		return fmt.Errorf("No SOURCE_NS_PREFIX %s was found", sourceNsPrefix)
 	}
 
-	// Remove existing anp-density-policy.yml and copy template if file exists
-	fs := afero.NewOsFs() // Replace with your embedded writable FS if needed
-	policyFile := "./config/anp-density-pods/anp-density-policy.yml"
-	templateFile := "./config/anp-density-pods/anp-density-policy-template.yml"
-	_, err = fs.Stat(policyFile)
-	if !errors.Is(err, os.ErrNotExist) {
-		// File exists, remove and copy template
-		if err := fs.Remove(policyFile); err != nil {
-			log.Printf("Failed to remove %s: %v", policyFile, err)
-		} else {
-			input, err := afero.ReadFile(fs, templateFile)
-			if err != nil {
-				log.Printf("Failed to read template file %s: %v", templateFile, err)
-			} else {
-				fmt.Println("copy file anp-density-policy.yml from anp-density-pods/anp-density-policy-template.yml")
-				if err := afero.WriteFile(fs, policyFile, input, 0644); err != nil {
-					log.Printf("Failed to copy template to %s: %v", policyFile, err)
-				}
-			}
-		}
-	}
 	// For simplicity, only use the first source ns
 	tenantID := 1
 	priority := 1
@@ -129,7 +193,19 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 	// Use client-go to label the namespace instead of exec.Command
 	kubeClientProvider := config.NewKubeClientProvider("", "")
 	// clientSet, _ := kubeClientProvider.ClientSet(0, 0)
-	clientSet, _ := kubeClientProvider.ClientSet(0, 0)
+	clientSet, restConfig := kubeClientProvider.ClientSet(0, 0)
+
+	dynamicClient, err := dynamic.NewForConfig(restConfig)
+	if err != nil {
+		return fmt.Errorf("failed to create dynamic client: %v", err)
+	}
+
+	anpList, err := dynamicClient.Resource(anpGVR).List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to list AdminNetworkPolicies: %v", err)
+	}
+
+	currentANPs := len(anpList.Items)
 
 	// For each tenant, generate a YAML
 	for nsIdx, sns := range sourceNsList {
@@ -166,13 +242,13 @@ spec:
       matchLabels:
         customer_tenant: tenant%d
   ingress:
-  - name: "all-ingress-from-same-tenant"
-    action: Allow   # Allows connection
+  - name: "all-ingress-from-same-tenant"  
+    action: Allow   # Allows connection 
     from:
     - namespaces:
         matchLabels:
           customer_tenat: tenant%d
-  egress:
+  egress:                           
   - name: "pass-egress-to-cluster-network"
     action: "Pass"
     ports:
@@ -181,7 +257,7 @@ spec:
           protocol: TCP
       - portNumber:
           port: 9094
-          protocol: TCP
+          protocol: TCP    
     to:
     - networks:
       - 10.128.0.0/14
@@ -209,34 +285,19 @@ spec:
 
 		// Optionally, print YAML to stdout for debugging
 		if newTenant {
-			// Save YAML to embedded filesystem (example using go:embed)
-			// This requires you to have an embedded FS variable, e.g.:
-			// var embeddedFS embed.FS
-			// For writing, you need to use a writable FS implementation, such as "github.com/spf13/afero"
-			// Here is an example using afero:
-			fs := afero.NewOsFs() // Replace with your embedded writable FS if available
-			fileName := fmt.Sprintf("./config/anp-density-pods/anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml", sourceNsPrefix, targetNsPrefix, tenantID, priority)
-			err := afero.WriteFile(fs, fileName, yaml.Bytes(), 0644)
-			if err != nil {
-				log.Printf("Failed to write YAML to embedded FS file %s: %v", fileName, err)
-			} else {
-				fmt.Printf("YAML written to embedded FS file: %s\n", fileName)
-			}
-
-			appendStr := fmt.Sprintf("\n      - objectTemplate: anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d.yaml\n        replicas: 1\n", sourceNsPrefix, targetNsPrefix, tenantID, priority)
-			f, err := fs.OpenFile(policyFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err != nil {
-				log.Printf("Failed to open %s for appending in embedded FS: %v", policyFile, err)
-			} else {
-				defer f.Close()
-				if _, err := f.WriteString(appendStr); err != nil {
-					log.Printf("Failed to append to %s in embedded FS: %v", policyFile, err)
-				}
-			}
-
+			// fmt.Println("------------------------------------------------------------")
+			// fmt.Println(yaml.String())
 			newTenant = false
+			// Using Dynamic Client to apply the YAML
+			if err := applyWithDynamicClient(restConfig, yaml.String()); err != nil {
+				log.Fatalf("Error applying with dynamic client: %v", err)
+			}
 		}
+
 	}
+
+	verifyAdminNetworkPolicies(restConfig, tenantID+currentANPs)
+
 	return nil
 }
 
@@ -297,12 +358,9 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 				fmt.Printf("Error: %v\n", err)
 			}
 
-			//rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
-
 		},
 
 		PostRun: func(cmd *cobra.Command, args []string) {
-			rc = wh.RunWithAdditionalVars("anp-density-policy.yml", AdditionalVars, nil)
 			os.Exit(rc)
 		},
 	}
