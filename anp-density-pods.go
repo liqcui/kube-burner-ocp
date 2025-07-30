@@ -159,11 +159,11 @@ func verifyAdminNetworkPolicies(config *rest.Config, expectedANPs int) error {
 		}
 	}
 
-	if len(anpList.Items) == 0 {
-		fmt.Println("No AdminNetworkPolicies found.")
-		return nil
-	}
 	log.Info("adminnetworkpolicies found: ", len(anpList.Items), " Expected: ", expectedANPs)
+
+	if len(anpList.Items) == 0 || len(anpList.Items) != expectedANPs {
+		return fmt.Errorf("No AdminNetworkPolicies found or mismatch expect number of ANPs.: %v", err)
+	}
 
 	return nil
 }
@@ -234,7 +234,7 @@ func generateCidrSelectorAnpMultiPolicyWithMultiRulesMultiIPsByTenant(
 		yaml.WriteString(fmt.Sprintf(`apiVersion: policy.networking.k8s.io/v1alpha1
 kind: AdminNetworkPolicy
 metadata:
-  name: anp-cidr-selector-allow-traffic-%s-to-%s-network-tenant%d-p%d
+  name: anp-cidr-selector-policy-rules-%s-to-%s-network-tenant%d-p%d
 spec:
   priority: %d
   subject:
