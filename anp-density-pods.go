@@ -332,8 +332,8 @@ func NewANPDensityPods(wh *workloads.WorkloadHelper, variant string) *cobra.Comm
 			AdditionalVars["POD_READY_THRESHOLD"] = podReadyThreshold
 			AdditionalVars["SVC_LATENCY"] = svcLatency
 
-			//rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
-			rc = wh.RunWithAdditionalVars("anp-density-pods.yml", AdditionalVars, nil)
+			rc = wh.RunWithAdditionalVars(cmd.Name()+".yml", AdditionalVars, nil)
+			//rc = wh.RunWithAdditionalVars("anp-density-pods.yml", AdditionalVars, nil)
 
 			sourceNsPrefix := "anp-cidr"
 			targetNsPrefix := "openshift-monitoring"
